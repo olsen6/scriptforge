@@ -9,9 +9,15 @@ import { createClient } from '@supabase/supabase-js'
 dotenv.config()
 
 const app = express()
+app.set('trust proxy', 1)
+
 const PORT = process.env.PORT || 3001
 const FREE_USER_LIMIT = 10
 const LOGGED_OUT_LIMIT = 3
+const STORY_MAX_CHARS = 12_000
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const SYSTEM_PROMPT =
   "You are a viral TikTok script writer. You think like a human who posts daily and gets millions of views. Before you write ask yourself: does this story make me feel ANGER, FEAR, or INJUSTICE? If no, amplify the stakes. HOOK: first 5 words must grab the throat, start with a body count, dollar amount, or betrayal, never start with 'What happened when' or 'You won't believe.' ESCALATION: each bullet adds a new layer of pain, include specifics like dates and dollar amounts, add [PAUSE] before the worst reveal. TWIST: someone knew and didn't tell, the victim was blamed, must be rewatchable. ENGAGEMENT BAIT: polarizing question with two sides, end with 'Comment TEAM A or TEAM B.' Forbidden words: delicious, interesting, perhaps, slightly. Required words: caught, confessed, discovered, admitted, realized, collapsed, froze. Format exactly: 🔥 HOOK: [hook]. 📈 ESCALATION: [bullets]. 🎭 TWIST: [twist]. 💬 ENGAGEMENT BAIT: [question]."
@@ -40,6 +46,14 @@ const supabaseAdmin =
 
 const guestGenerationTracker = new Map()
 
+const apiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 250,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many API requests. Try again in one hour.' },
+})
+
 const generateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 100,
@@ -48,9 +62,27 @@ const generateLimiter = rateLimit({
   message: { error: 'Rate limit reached. Try again in one hour.' },
 })
 
+const checkoutLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many checkout requests. Try again later.' },
+})
+
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many webhook requests. Try again later.' },
+})
+
 app.use(cors())
+app.use('/api', apiLimiter)
 app.post(
   '/api/stripe-webhook',
+  webhookLimiter,
   express.raw({ type: 'application/json' }),
   async (req, res) => {
     if (!stripe || !supabaseAdmin) {
@@ -61,7 +93,11 @@ app.post(
     }
 
     const signature = req.headers['stripe-signature']
-    if (!signature || !process.env.STRIPE_WEBHOOK_SECRET) {
+    if (
+      typeof signature !== 'string' ||
+      !signature ||
+      !process.env.STRIPE_WEBHOOK_SECRET
+    ) {
       return res.status(400).json({ error: 'Invalid webhook signature settings.' })
     }
 
@@ -80,7 +116,7 @@ app.post(
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object
-          const userId = session?.metadata?.userId
+          const userId = sanitizeUuid(session?.metadata?.userId)
 
           if (userId) {
             const { error } = await supabaseAdmin
@@ -157,10 +193,19 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
     })
   }
 
-  const { story, userId, isPaid } = req.body ?? {}
+  const payload = asPlainObject(req.body)
+  const story = sanitizeStory(payload.story)
+  const userId = sanitizeNullableUuid(payload.userId)
+  const isPaid = sanitizeBoolean(payload.isPaid)
 
-  if (!story || typeof story !== 'string') {
-    return res.status(400).json({ error: 'Story is required.' })
+  if (!story) return res.status(400).json({ error: 'Story is required.' })
+  if (story.length > STORY_MAX_CHARS) {
+    return res
+      .status(400)
+      .json({ error: `Story exceeds maximum length of ${STORY_MAX_CHARS} characters.` })
+  }
+  if (payload.userId !== undefined && payload.userId !== null && !userId) {
+    return res.status(400).json({ error: 'Invalid userId format.' })
   }
 
   let activePaidAccess = Boolean(isPaid)
@@ -247,13 +292,18 @@ app.post('/api/create-checkout', async (req, res) => {
       .json({ error: 'Missing STRIPE_SECRET_KEY in environment.' })
   }
 
-  const { userId, userEmail } = req.body ?? {}
+  const payload = asPlainObject(req.body)
+  const userId = sanitizeUuid(payload.userId)
+  const userEmail = sanitizeEmail(payload.userEmail)
+
   if (!userId || !userEmail) {
     return res.status(400).json({ error: 'userId and userEmail are required.' })
   }
 
   try {
-    const baseUrl = process.env.APP_URL || req.headers.origin || 'http://localhost:5173'
+    const baseUrl = sanitizeBaseUrl(
+      process.env.APP_URL || req.headers.origin || 'http://localhost:5173',
+    )
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer_email: userEmail,
@@ -372,4 +422,57 @@ async function incrementUserUsage(userId, nextCount) {
 
   if (error) throw error
   return data.count
+}
+
+function asPlainObject(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
+  return input
+}
+
+function sanitizeString(value, maxLength = 1000) {
+  if (typeof value !== 'string') return ''
+  const cleaned = value
+    .replace(/\0/g, '')
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+  if (!maxLength) return cleaned
+  return cleaned.slice(0, maxLength)
+}
+
+function sanitizeStory(value) {
+  const cleaned = sanitizeString(value, STORY_MAX_CHARS + 1).replace(/\r\n/g, '\n')
+  return cleaned
+}
+
+function sanitizeUuid(value) {
+  const cleaned = sanitizeString(value, 80).toLowerCase()
+  if (!UUID_PATTERN.test(cleaned)) return null
+  return cleaned
+}
+
+function sanitizeNullableUuid(value) {
+  if (value === undefined || value === null || value === '') return null
+  return sanitizeUuid(value)
+}
+
+function sanitizeEmail(value) {
+  const cleaned = sanitizeString(value, 320).toLowerCase()
+  if (!EMAIL_PATTERN.test(cleaned)) return null
+  return cleaned
+}
+
+function sanitizeBoolean(value) {
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+function sanitizeBaseUrl(value) {
+  try {
+    const parsed = new URL(String(value))
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Invalid protocol.')
+    }
+    return `${parsed.protocol}//${parsed.host}`
+  } catch (_error) {
+    return 'http://localhost:5173'
+  }
 }
