@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
 const GUEST_LIMIT = 3
+const API_BASE_URL = 'https://scriptforge-production.up.railway.app'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -214,7 +215,7 @@ function App() {
     setError('')
 
     try {
-      const response = await fetch('/api/generate', {
+      const response = await fetch(`${API_BASE_URL}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -278,7 +279,7 @@ function App() {
     setError('')
 
     try {
-      const response = await fetch('/api/create-checkout', {
+      const response = await fetch(`${API_BASE_URL}/api/create-checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
