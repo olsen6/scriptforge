@@ -120,7 +120,7 @@ const webhookLimiter = rateLimit({
   message: { error: 'Too many webhook requests. Try again later.' },
 })
 
-app.use(cors())
+app.use(cors({origin: '*', methods:['GET','POST','OPTIONS'], allowedHeaders:['Content-Type']}))
 app.use('/api', apiLimiter)
 app.post(
   '/api/stripe-webhook',
