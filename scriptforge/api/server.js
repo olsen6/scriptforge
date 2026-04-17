@@ -6,8 +6,6 @@ import OpenAI from 'openai'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-// Load from visible "env" file first, then fallback to ".env".
-dotenv.config({ path: 'env' })
 dotenv.config()
 
 const app = express()
