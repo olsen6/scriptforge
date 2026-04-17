@@ -18,9 +18,51 @@ const STORY_MAX_CHARS = 12_000
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const STRIPE_ACTIVE_STATUSES = new Set(['active', 'trialing', 'past_due', 'unpaid'])
 
-const SYSTEM_PROMPT =
-  "You are a viral TikTok script writer. You think like a human who posts daily and gets millions of views. Before you write ask yourself: does this story make me feel ANGER, FEAR, or INJUSTICE? If no, amplify the stakes. HOOK: first 5 words must grab the throat, start with a body count, dollar amount, or betrayal, never start with 'What happened when' or 'You won't believe.' ESCALATION: each bullet adds a new layer of pain, include specifics like dates and dollar amounts, add [PAUSE] before the worst reveal. TWIST: someone knew and didn't tell, the victim was blamed, must be rewatchable. ENGAGEMENT BAIT: polarizing question with two sides, end with 'Comment TEAM A or TEAM B.' Forbidden words: delicious, interesting, perhaps, slightly. Required words: caught, confessed, discovered, admitted, realized, collapsed, froze. Format exactly: 🔥 HOOK: [hook]. 📈 ESCALATION: [bullets]. 🎭 TWIST: [twist]. 💬 ENGAGEMENT BAIT: [question]."
+const SYSTEM_PROMPT = `You are ScriptForge's elite viral narrative writer. You write short-form stories that feel cinematic, morally charged, and impossible to scroll past.
+
+MISSION
+- Convert raw Reddit drama into a high-retention TikTok script.
+- Maximize emotional intensity and replay value.
+- The viewer must feel at least one of: ANGER, FEAR, INJUSTICE.
+- If the source story is flat, raise stakes with plausible specifics while preserving core facts.
+
+NON-NEGOTIABLE WRITING RULES
+1) HOOK QUALITY:
+   - First 5 words must "grab the throat."
+   - Start with one of: body count, dollar amount, betrayal, or accusation.
+   - NEVER start with: "What happened when" or "You won't believe."
+   - Use concrete nouns and hard numbers.
+
+2) ESCALATION:
+   - Write 4-7 bullet lines.
+   - Every bullet must add a NEW layer of pain, risk, or humiliation.
+   - Include specifics like dates, dollar amounts, job titles, legal terms, screenshots, witnesses.
+   - Add [PAUSE] immediately before the ugliest reveal.
+
+3) TWIST:
+   - Must include betrayal + hidden knowledge.
+   - One of these must be true: someone knew and didn't tell, victim was blamed, receipts changed everything.
+   - Twist must make the viewer want to rewatch for clues.
+
+4) ENGAGEMENT BAIT:
+   - End with a polarizing 2-sided question.
+   - Last sentence must be exactly: "Comment TEAM A or TEAM B."
+
+LANGUAGE REQUIREMENTS
+- Forbidden words: delicious, interesting, perhaps, slightly.
+- Required words (all must appear at least once across the script): caught, confessed, discovered, admitted, realized, collapsed, froze.
+- Tone: sharp, human, conversational, intense. No fluff, no corporate phrasing.
+
+FORMAT (exactly this structure)
+🔥 HOOK: [hook]
+📈 ESCALATION:
+- [bullet]
+- [bullet]
+- [bullet]
+🎭 TWIST: [twist]
+💬 ENGAGEMENT BAIT: [question]`
 
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -83,7 +125,7 @@ app.use('/api', apiLimiter)
 app.post(
   '/api/stripe-webhook',
   webhookLimiter,
-  express.raw({ type: 'application/json' }),
+  express.raw({ type: 'application/json', limit: '300kb' }),
   async (req, res) => {
     if (!stripe || !supabaseAdmin) {
       return res.status(500).json({
@@ -116,7 +158,20 @@ app.post(
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object
-          const userId = sanitizeUuid(session?.metadata?.userId)
+          const customerId = session.customer ? String(session.customer) : null
+          let userId =
+            sanitizeUuid(session?.metadata?.userId) ??
+            sanitizeUuid(session?.client_reference_id)
+
+          if (!userId && customerId) {
+            const { data: existingByCustomer, error: existingError } = await supabaseAdmin
+              .from('user_subscriptions')
+              .select('user_id')
+              .eq('stripe_customer_id', customerId)
+              .maybeSingle()
+            if (existingError) throw existingError
+            userId = sanitizeNullableUuid(existingByCustomer?.user_id)
+          }
 
           if (userId) {
             const { error } = await supabaseAdmin
@@ -125,9 +180,7 @@ app.post(
                 {
                   user_id: userId,
                   status: 'active',
-                  stripe_customer_id: session.customer
-                    ? String(session.customer)
-                    : null,
+                  stripe_customer_id: customerId,
                   plan_type: 'monthly',
                   updated_at: new Date().toISOString(),
                 },
@@ -138,11 +191,33 @@ app.post(
           }
           break
         }
-        case 'customer.subscription.deleted': {
+        case 'customer.subscription.deleted':
+        case 'customer.subscription.updated': {
           const subscription = event.data.object
           const customerId = subscription.customer
             ? String(subscription.customer)
             : null
+          const userId =
+            sanitizeUuid(subscription?.metadata?.userId) ??
+            sanitizeUuid(subscription?.metadata?.user_id)
+          const nextStatus = normalizeSubscriptionStatus(subscription.status)
+
+          if (userId) {
+            const { error: upsertError } = await supabaseAdmin
+              .from('user_subscriptions')
+              .upsert(
+                {
+                  user_id: userId,
+                  status: nextStatus,
+                  stripe_customer_id: customerId,
+                  plan_type: 'monthly',
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: 'user_id' },
+              )
+            if (upsertError) throw upsertError
+            break
+          }
 
           if (customerId) {
             const { data: existingRow, error: selectError } = await supabaseAdmin
@@ -157,7 +232,7 @@ app.post(
               const { error: updateError } = await supabaseAdmin
                 .from('user_subscriptions')
                 .update({
-                  status: 'inactive',
+                  status: nextStatus,
                   updated_at: new Date().toISOString(),
                 })
                 .eq('user_id', existingRow.user_id)
@@ -285,7 +360,7 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
   }
 })
 
-app.post('/api/create-checkout', async (req, res) => {
+app.post('/api/create-checkout', checkoutLimiter, async (req, res) => {
   if (!stripe) {
     return res
       .status(500)
@@ -306,11 +381,13 @@ app.post('/api/create-checkout', async (req, res) => {
     )
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
+      client_reference_id: userId,
       customer_email: userEmail,
-      success_url: `${baseUrl}/?checkout=success`,
+      success_url: `${baseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/?checkout=cancelled`,
       metadata: { userId },
       subscription_data: { metadata: { userId } },
+      allow_promotion_codes: true,
       line_items: [
         {
           quantity: 1,
@@ -466,6 +543,19 @@ function sanitizeBoolean(value) {
 }
 
 function sanitizeBaseUrl(value) {
+  const appBaseUrl = parseHttpUrl(process.env.APP_URL)
+  const fallback = appBaseUrl || 'http://localhost:5173'
+
+  if (!value) return fallback
+
+  const candidate = parseHttpUrl(value)
+  if (!candidate) return fallback
+
+  if (!appBaseUrl) return candidate
+  return candidate === appBaseUrl ? candidate : fallback
+}
+
+function parseHttpUrl(value) {
   try {
     const parsed = new URL(String(value))
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -473,6 +563,11 @@ function sanitizeBaseUrl(value) {
     }
     return `${parsed.protocol}//${parsed.host}`
   } catch (_error) {
-    return 'http://localhost:5173'
+    return null
   }
+}
+
+function normalizeSubscriptionStatus(subscriptionStatus) {
+  const cleaned = sanitizeString(subscriptionStatus, 40).toLowerCase()
+  return STRIPE_ACTIVE_STATUSES.has(cleaned) ? 'active' : 'inactive'
 }
