@@ -3,7 +3,9 @@ import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
 const GUEST_LIMIT = 3
-const API_BASE_URL = 'https://scriptforge-production.up.railway.app'
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL?.trim() ||
+  'https://scriptforge-production.up.railway.app'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -37,6 +39,49 @@ function parseScript(script) {
     twist: capture('🎭 TWIST', '💬 ENGAGEMENT BAIT'),
     engagement: capture('💬 ENGAGEMENT BAIT', ''),
   }
+}
+
+function buildApiUrl(path) {
+  const base = API_BASE_URL.endsWith('/')
+    ? API_BASE_URL.slice(0, -1)
+    : API_BASE_URL
+  return `${base}${path}`
+}
+
+function messageFromNonJsonResponse(response, text) {
+  const cleaned = text.trim()
+  if (!cleaned) return `Request failed with status ${response.status}.`
+  const looksLikeHtml =
+    cleaned.startsWith('<!DOCTYPE html') ||
+    cleaned.startsWith('<html') ||
+    cleaned.includes('<title>')
+  if (looksLikeHtml) {
+    return 'API returned HTML instead of JSON. Check VITE_API_BASE_URL and ensure it points to the backend service.'
+  }
+  return cleaned.slice(0, 260)
+}
+
+async function readApiPayload(response) {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    try {
+      return await response.json()
+    } catch (_error) {
+      // Fall through to text parsing below.
+    }
+  }
+
+  const text = await response.text()
+  if (!text) return {}
+
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object') return parsed
+  } catch (_error) {
+    // Non-JSON response body.
+  }
+
+  return { error: messageFromNonJsonResponse(response, text) }
 }
 
 function App() {
@@ -228,7 +273,7 @@ function App() {
     setError('')
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/generate`, {
+      const response = await fetch(buildApiUrl('/api/generate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -238,7 +283,7 @@ function App() {
         }),
       })
 
-      const payload = await response.json()
+      const payload = await readApiPayload(response)
       if (!response.ok) {
         if (response.status === 402) {
           setShowPaywall(true)
@@ -300,7 +345,7 @@ function App() {
     setError('')
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/create-checkout`, {
+      const response = await fetch(buildApiUrl('/api/create-checkout'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -308,7 +353,7 @@ function App() {
           userEmail: user.email,
         }),
       })
-      const payload = await response.json()
+      const payload = await readApiPayload(response)
       if (!response.ok) {
         setError(payload.error ?? 'Unable to start checkout.')
         return
@@ -605,6 +650,7 @@ function App() {
             <textarea
               value={story}
               onChange={(event) => setStory(event.target.value)}
+              onKeyDown={handleStoryKeyDown}
               placeholder="Drop the full Reddit story, including context, timeline, and conflict..."
             />
             <div className="controls">
