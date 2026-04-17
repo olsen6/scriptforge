@@ -500,6 +500,11 @@ function App() {
           font-size: 0.85rem;
           color: #cbd5e1;
         }
+        .helper {
+          margin-top: 8px;
+          font-size: 0.8rem;
+          color: #c4b5fd;
+        }
         .sections {
           display: grid;
           gap: 12px;
@@ -661,6 +666,7 @@ function App() {
                 onKeyDown={handleStoryKeyDown}
                 placeholder="Drop the full Reddit story, including context, timeline, and conflict..."
               />
+              <p className="helper">Press Enter to generate. Use Shift+Enter for a new line.</p>
               <div className="controls">
                 <span className="muted">
                   {user
