@@ -59,6 +59,13 @@ function App() {
 
   const user = session?.user ?? null
   const canUseSupabase = Boolean(supabase)
+  const isGuestLimitReached = !user && guestRemaining <= 0
+  const isFreeUserLimitReached =
+    Boolean(user) &&
+    !generationState.isPaid &&
+    generationState.count >= generationState.limit
+  const isGenerationLimitReached = isGuestLimitReached || isFreeUserLimitReached
+  const canTriggerGeneration = !isGenerating && !isGenerationLimitReached
 
   useEffect(() => {
     if (!canUseSupabase) {
@@ -206,6 +213,12 @@ function App() {
   }
 
   const generateScript = async () => {
+    if (isGenerationLimitReached) {
+      setShowPaywall(true)
+      setError('')
+      return
+    }
+
     if (!story.trim()) {
       setError('Paste a Reddit story before generating.')
       return
@@ -257,6 +270,14 @@ function App() {
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const handleStoryKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return
+
+    event.preventDefault()
+    if (!story.trim() || !canTriggerGeneration) return
+    void generateScript()
   }
 
   const copyScript = async () => {
@@ -591,7 +612,7 @@ function App() {
                 {user
                   ? generationState.isPaid
                     ? 'Unlimited generations enabled.'
-                    : `${generationState.limit - generationState.count} free generations left this month.`
+                    : `${Math.max(0, generationState.limit - generationState.count)} free generations left this month.`
                   : `${guestRemaining} of ${GUEST_LIMIT} free guest generations left.`}
               </span>
               <div className="actions">
@@ -599,7 +620,7 @@ function App() {
                   className="primary"
                   type="button"
                   onClick={generateScript}
-                  disabled={isGenerating}
+                  disabled={!story.trim() || !canTriggerGeneration}
                 >
                   {isGenerating ? 'Generating...' : 'Generate Script'}
                 </button>
