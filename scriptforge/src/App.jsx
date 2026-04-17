@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
@@ -99,6 +99,7 @@ function App() {
   const [guestRemaining, setGuestRemaining] = useState(GUEST_LIMIT)
   const [showPaywall, setShowPaywall] = useState(false)
   const [bannerMessage, setBannerMessage] = useState('')
+  const generateButtonRef = useRef(null)
 
   const scriptSections = useMemo(() => parseScript(script), [script])
 
@@ -327,7 +328,8 @@ function App() {
     if (event.key !== 'Enter' || event.shiftKey) return
 
     event.preventDefault()
-    submitGenerate()
+    if (!story.trim() || !canTriggerGeneration) return
+    generateButtonRef.current?.click()
   }
 
   const copyScript = async () => {
@@ -669,6 +671,7 @@ function App() {
                 </span>
                 <div className="actions">
                   <button
+                    ref={generateButtonRef}
                     className="primary"
                     type="submit"
                     disabled={!story.trim() || !canTriggerGeneration}
