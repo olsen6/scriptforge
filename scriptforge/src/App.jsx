@@ -317,12 +317,17 @@ function App() {
     }
   }
 
+  const submitGenerate = (event) => {
+    if (event) event.preventDefault()
+    if (!story.trim() || !canTriggerGeneration) return
+    void generateScript()
+  }
+
   const handleStoryKeyDown = (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return
 
     event.preventDefault()
-    if (!story.trim() || !canTriggerGeneration) return
-    void generateScript()
+    submitGenerate()
   }
 
   const copyScript = async () => {
@@ -647,36 +652,37 @@ function App() {
         ) : (
           <div className="panel workspace">
             <h2>Paste your Reddit story</h2>
-            <textarea
-              value={story}
-              onChange={(event) => setStory(event.target.value)}
-              onKeyDown={handleStoryKeyDown}
-              placeholder="Drop the full Reddit story, including context, timeline, and conflict..."
-            />
-            <div className="controls">
-              <span className="muted">
-                {user
-                  ? generationState.isPaid
-                    ? 'Unlimited generations enabled.'
-                    : `${Math.max(0, generationState.limit - generationState.count)} free generations left this month.`
-                  : `${guestRemaining} of ${GUEST_LIMIT} free guest generations left.`}
-              </span>
-              <div className="actions">
-                <button
-                  className="primary"
-                  type="button"
-                  onClick={generateScript}
-                  disabled={!story.trim() || !canTriggerGeneration}
-                >
-                  {isGenerating ? 'Generating...' : 'Generate Script'}
-                </button>
-                {script && (
-                  <button className="ghost" type="button" onClick={copyScript}>
-                    Copy to clipboard
+            <form onSubmit={submitGenerate}>
+              <textarea
+                value={story}
+                onChange={(event) => setStory(event.target.value)}
+                onKeyDown={handleStoryKeyDown}
+                placeholder="Drop the full Reddit story, including context, timeline, and conflict..."
+              />
+              <div className="controls">
+                <span className="muted">
+                  {user
+                    ? generationState.isPaid
+                      ? 'Unlimited generations enabled.'
+                      : `${Math.max(0, generationState.limit - generationState.count)} free generations left this month.`
+                    : `${guestRemaining} of ${GUEST_LIMIT} free guest generations left.`}
+                </span>
+                <div className="actions">
+                  <button
+                    className="primary"
+                    type="submit"
+                    disabled={!story.trim() || !canTriggerGeneration}
+                  >
+                    {isGenerating ? 'Generating...' : 'Generate Script'}
                   </button>
-                )}
+                  {script && (
+                    <button className="ghost" type="button" onClick={copyScript}>
+                      Copy to clipboard
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            </form>
 
             {script && (
               <div className="sections">
