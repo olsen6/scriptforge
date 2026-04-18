@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
@@ -22,23 +22,6 @@ const INITIAL_GENERATION_STATE = {
 
 function getMonthKey(date) {
   return `${date.getUTCFullYear()}-${date.getUTCMonth()}`
-}
-
-function parseScript(script) {
-  const capture = (label, nextLabel) => {
-    const regex = new RegExp(
-      `${label}:\\s*([\\s\\S]*?)(?=${nextLabel ? `${nextLabel}:` : '$'})`,
-      'm',
-    )
-    return script.match(regex)?.[1]?.trim() ?? ''
-  }
-
-  return {
-    hook: capture('🔥 HOOK', '📈 ESCALATION'),
-    escalation: capture('📈 ESCALATION', '🎭 TWIST'),
-    twist: capture('🎭 TWIST', '💬 ENGAGEMENT BAIT'),
-    engagement: capture('💬 ENGAGEMENT BAIT', ''),
-  }
 }
 
 function buildApiUrl(path) {
@@ -100,8 +83,6 @@ function App() {
   const [showPaywall, setShowPaywall] = useState(false)
   const [bannerMessage, setBannerMessage] = useState('')
   const generateButtonRef = useRef(null)
-
-  const scriptSections = useMemo(() => parseScript(script), [script])
 
   const user = session?.user ?? null
   const canUseSupabase = Boolean(supabase)
@@ -696,20 +677,8 @@ function App() {
             {script && (
               <div className="sections">
                 <div className="section">
-                  <h3>🔥 HOOK</h3>
-                  <p>{scriptSections.hook || 'Not detected'}</p>
-                </div>
-                <div className="section">
-                  <h3>📈 ESCALATION</h3>
-                  <p>{scriptSections.escalation || 'Not detected'}</p>
-                </div>
-                <div className="section">
-                  <h3>🎭 TWIST</h3>
-                  <p>{scriptSections.twist || 'Not detected'}</p>
-                </div>
-                <div className="section">
-                  <h3>💬 ENGAGEMENT BAIT</h3>
-                  <p>{scriptSections.engagement || 'Not detected'}</p>
+                  <h3>Generated Voiceover Script</h3>
+                  <p>{script}</p>
                 </div>
               </div>
             )}
