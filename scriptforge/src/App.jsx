@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
 const GUEST_LIMIT = 3
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const PLAN_OPTIONS = [
   {
     id: 'starter',
@@ -42,10 +43,6 @@ const INITIAL_GENERATION_STATE = {
   hookOptions: [],
   endingOptions: [],
   captionIdeas: [],
-}
-
-function getMonthKey(date) {
-  return `${date.getUTCFullYear()}-${date.getUTCMonth()}`
 }
 
 function buildApiUrl(path) {
@@ -174,7 +171,7 @@ function App() {
     }
 
     const hydrateUserState = async () => {
-      const nowMonthKey = getMonthKey(new Date())
+      const now = Date.now()
 
       const [{ data: profileData }, { data: countData }, { data: subData }] =
         await Promise.all([
@@ -200,10 +197,11 @@ function App() {
       }
 
       const isPaid = subData?.status === 'active'
-      const rowMonthKey = countData?.last_reset
-        ? getMonthKey(new Date(countData.last_reset))
-        : nowMonthKey
-      const safeCount = rowMonthKey === nowMonthKey ? countData?.count ?? 0 : 0
+      const lastResetMs = countData?.last_reset
+        ? new Date(countData.last_reset).getTime()
+        : now
+      const safeCount =
+        now - lastResetMs > THIRTY_DAYS_MS ? 0 : countData?.count ?? 0
 
       setGenerationState({
         count: safeCount,
@@ -331,6 +329,15 @@ function App() {
             typeof payload.planType === 'string' && payload.planType
               ? payload.planType
               : prev.planType,
+          hookOptions: Array.isArray(payload.bonus?.hookOptions)
+            ? payload.bonus.hookOptions
+            : [],
+          endingOptions: Array.isArray(payload.bonus?.endingOptions)
+            ? payload.bonus.endingOptions
+            : [],
+          captionIdeas: Array.isArray(payload.bonus?.captionIdeas)
+            ? payload.bonus.captionIdeas
+            : [],
         }))
       } else if (typeof payload.remainingGuestGenerations === 'number') {
         setGuestRemaining(Math.max(0, payload.remainingGuestGenerations))

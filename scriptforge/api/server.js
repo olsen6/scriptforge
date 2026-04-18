@@ -239,7 +239,10 @@ app.post(
                   user_id: userId,
                   status: nextStatus,
                   stripe_customer_id: customerId,
-                  plan_type: 'monthly',
+                  plan_type:
+                    sanitizePlanType(subscription?.metadata?.planType) ??
+                    sanitizePlanType(subscription?.metadata?.plan_type) ??
+                    PLAN_STARTER,
                   updated_at: new Date().toISOString(),
                 },
                 { onConflict: 'user_id' },
