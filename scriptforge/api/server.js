@@ -13,7 +13,7 @@ app.set('trust proxy', 1)
 
 const PORT = process.env.PORT || 3001
 const FREE_USER_LIMIT = 10
-const LOGGED_OUT_LIMIT = 3
+const LOGGED_OUT_LIMIT = 5
 const STORY_MAX_CHARS = 12_000
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const PLAN_STARTER = 'starter'

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
-const GUEST_LIMIT = 3
+const GUEST_LIMIT = 5
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const PLAN_OPTIONS = [
   {
