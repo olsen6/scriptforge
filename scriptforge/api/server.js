@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3001
 const FREE_USER_LIMIT = 10
 const LOGGED_OUT_LIMIT = 3
 const STORY_MAX_CHARS = 12_000
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -429,17 +430,13 @@ app.listen(PORT, () => {
   console.log(`ScriptForge API listening on port ${PORT}`)
 })
 
-function monthKey(date) {
-  return `${date.getUTCFullYear()}-${date.getUTCMonth()}`
-}
-
 function getGuestUsage(ipAddress) {
   const key = ipAddress || 'unknown-ip'
-  const nowKey = monthKey(new Date())
+  const now = Date.now()
   const existing = guestGenerationTracker.get(key)
 
-  if (!existing || existing.monthKey !== nowKey) {
-    const freshUsage = { count: 0, monthKey: nowKey }
+  if (!existing || now - existing.lastReset > THIRTY_DAYS_MS) {
+    const freshUsage = { count: 0, lastReset: now }
     guestGenerationTracker.set(key, freshUsage)
     return freshUsage
   }
@@ -468,7 +465,7 @@ async function getUserUsage(userId) {
   if (error) throw error
 
   const now = new Date()
-  const nowKey = monthKey(now)
+  const nowMs = now.getTime()
 
   if (!data) {
     const { error: insertError } = await supabaseAdmin
@@ -483,8 +480,8 @@ async function getUserUsage(userId) {
     return { count: 0 }
   }
 
-  const rowKey = data.last_reset ? monthKey(new Date(data.last_reset)) : nowKey
-  if (rowKey !== nowKey) {
+  const lastResetMs = data.last_reset ? new Date(data.last_reset).getTime() : nowMs
+  if (nowMs - lastResetMs > THIRTY_DAYS_MS) {
     const { error: resetError } = await supabaseAdmin
       .from('user_counts')
       .update({
