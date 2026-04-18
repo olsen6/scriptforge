@@ -313,6 +313,7 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
   }
 
   let activePaidAccess = Boolean(isPaid)
+  let paidPlanType = PLAN_STARTER
   let userCount = 0
 
   try {
@@ -328,7 +329,9 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
         })
       }
     } else {
-      activePaidAccess = activePaidAccess || (await hasPaidAccess(userId))
+      const subscriptionState = await getSubscriptionState(userId)
+      activePaidAccess = activePaidAccess || subscriptionState.isActive
+      paidPlanType = subscriptionState.planType
 
       if (!activePaidAccess) {
         const userUsage = await getUserUsage(userId)
@@ -381,11 +384,19 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
       })
     }
 
+    const bonus = await maybeGenerateTierBonus({
+      story,
+      script,
+      planType: paidPlanType,
+    })
+
     return res.json({
       script,
       count: userCount,
       limit: FREE_USER_LIMIT,
       isPaid: true,
+      planType: paidPlanType,
+      bonus,
     })
   } catch (error) {
     console.error('/api/generate failed:', error)
@@ -403,47 +414,48 @@ app.post('/api/create-checkout', checkoutLimiter, async (req, res) => {
   const payload = asPlainObject(req.body)
   const userId = sanitizeUuid(payload.userId)
   const userEmail = sanitizeEmail(payload.userEmail)
+  const planType = sanitizePlanType(payload.planType)
 
-  if (!userId || !userEmail) {
-    return res.status(400).json({ error: 'userId and userEmail are required.' })
+  if (!userId || !userEmail || !planType) {
+    return res
+      .status(400)
+      .json({ error: 'userId, userEmail, and valid planType are required.' })
   }
 
   try {
-    const { error: pendingError } = await supabaseAdmin
-      .from('user_subscriptions')
-      .upsert(
-        {
-          user_id: userId,
-          status: 'inactive',
-          plan_type: 'monthly',
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' },
-      )
-    if (pendingError) throw pendingError
+    await upsertPendingSubscription(userId, planType)
 
     const baseUrl = sanitizeBaseUrl(
       process.env.APP_URL || req.headers.origin || 'http://localhost:5173',
     )
+    const unitAmount = PLAN_PRICING[planType]
+    const productName = `ScriptForge ${formatPlanLabel(planType)}`
+    const productDescription =
+      planType === PLAN_STUDIO
+        ? 'Unlimited generations + premium hook/end variants + caption ideas'
+        : planType === PLAN_CREATOR
+          ? 'Unlimited generations + stronger hooks and ending variants'
+          : 'Unlimited Reddit-to-TikTok script generations'
+
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       client_reference_id: userId,
       customer_email: userEmail,
       success_url: `${baseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/?checkout=cancelled`,
-      metadata: { userId },
-      subscription_data: { metadata: { userId } },
+      metadata: { userId, planType },
+      subscription_data: { metadata: { userId, planType } },
       allow_promotion_codes: true,
       line_items: [
         {
           quantity: 1,
           price_data: {
             currency: 'usd',
-            unit_amount: 1200,
+            unit_amount: unitAmount,
             recurring: { interval: 'month' },
             product_data: {
-              name: 'ScriptForge Pro',
-              description: 'Unlimited Reddit-to-TikTok script generations',
+              name: productName,
+              description: productDescription,
             },
           },
         },
@@ -475,15 +487,18 @@ function getGuestUsage(ipAddress) {
   return existing
 }
 
-async function hasPaidAccess(userId) {
+async function getSubscriptionState(userId) {
   const { data, error } = await supabaseAdmin
     .from('user_subscriptions')
-    .select('status')
+    .select('status, plan_type')
     .eq('user_id', userId)
     .maybeSingle()
 
   if (error) throw error
-  return data?.status === 'active'
+  return {
+    isActive: data?.status === 'active',
+    planType: sanitizePlanType(data?.plan_type) ?? PLAN_STARTER,
+  }
 }
 
 async function getUserUsage(userId) {
@@ -584,6 +599,12 @@ function sanitizeBoolean(value) {
   return value === true || value === 'true' || value === 1 || value === '1'
 }
 
+function sanitizePlanType(value) {
+  const cleaned = sanitizeString(value, 24).toLowerCase()
+  if (!VALID_PLAN_TYPES.has(cleaned)) return null
+  return cleaned
+}
+
 function sanitizeBaseUrl(value) {
   const appBaseUrl = parseHttpUrl(process.env.APP_URL)
   const fallback = appBaseUrl || 'http://localhost:5173'
@@ -614,7 +635,44 @@ function normalizeSubscriptionStatus(subscriptionStatus) {
   return STRIPE_ACTIVE_STATUSES.has(cleaned) ? 'active' : 'inactive'
 }
 
+async function updateSubscriptionPlan(userId, planType) {
+  const { error } = await supabaseAdmin
+    .from('user_subscriptions')
+    .update({
+      plan_type: planType,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
 async function upsertActiveSubscription(userId, customerId) {
+  let planType = PLAN_STARTER
+
+  if (customerId) {
+    try {
+      const subscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'all',
+        limit: 5,
+      })
+      const newest = subscriptions.data?.[0]
+      const metadataPlan = sanitizePlanType(newest?.metadata?.planType)
+      if (metadataPlan) {
+        planType = metadataPlan
+      } else {
+        const amount =
+          newest?.items?.data?.[0]?.price?.unit_amount ?? newest?.plan?.amount
+        if (amount === PLAN_PRICING[PLAN_STUDIO]) planType = PLAN_STUDIO
+        else if (amount === PLAN_PRICING[PLAN_CREATOR]) planType = PLAN_CREATOR
+        else planType = PLAN_STARTER
+      }
+    } catch (error) {
+      console.error('Unable to infer plan from Stripe subscription:', error)
+    }
+  }
+
   const { error } = await supabaseAdmin
     .from('user_subscriptions')
     .upsert(
@@ -622,12 +680,82 @@ async function upsertActiveSubscription(userId, customerId) {
         user_id: userId,
         status: 'active',
         stripe_customer_id: customerId,
-        plan_type: 'monthly',
+        plan_type: planType,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' },
     )
 
   if (error) throw error
+}
+
+async function upsertPendingSubscription(userId, planType) {
+  const { error } = await supabaseAdmin
+    .from('user_subscriptions')
+    .upsert(
+      {
+        user_id: userId,
+        status: 'inactive',
+        plan_type: planType,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    )
+
+  if (error) throw error
+}
+
+function formatPlanLabel(planType) {
+  if (planType === PLAN_CREATOR) return 'Creator'
+  if (planType === PLAN_STUDIO) return 'Studio'
+  return 'Starter'
+}
+
+async function maybeGenerateTierBonus({ story, script, planType }) {
+  if (!openai || planType === PLAN_STARTER) return null
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.8,
+      messages: [
+        { role: 'system', content: TIER_BONUS_PROMPT },
+        {
+          role: 'user',
+          content: `Plan: ${planType}\n\nStory:\n${story}\n\nScript:\n${script}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+    })
+
+    const raw = response.choices?.[0]?.message?.content?.trim()
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw)
+    const bonus = {
+      hookOptions: sanitizeStringArray(parsed.hookOptions, planType === PLAN_STUDIO ? 3 : 2),
+      endingOptions: sanitizeStringArray(
+        parsed.endingOptions,
+        planType === PLAN_STUDIO ? 3 : 2,
+      ),
+    }
+
+    if (planType === PLAN_STUDIO) {
+      bonus.captionIdeas = sanitizeStringArray(parsed.captionIdeas, 3)
+    }
+
+    return bonus
+  } catch (error) {
+    console.error('Tier bonus generation failed:', error)
+    return null
+  }
+}
+
+function sanitizeStringArray(value, maxItems) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => sanitizeString(item, 220))
+    .filter(Boolean)
+    .slice(0, maxItems)
 }
 

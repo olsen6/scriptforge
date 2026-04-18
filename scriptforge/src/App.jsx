@@ -38,6 +38,10 @@ const INITIAL_GENERATION_STATE = {
   count: 0,
   limit: FREE_LOGGED_IN_LIMIT,
   isPaid: false,
+  planType: 'free',
+  hookOptions: [],
+  endingOptions: [],
+  captionIdeas: [],
 }
 
 function getMonthKey(date) {
@@ -205,6 +209,7 @@ function App() {
         count: safeCount,
         limit: FREE_LOGGED_IN_LIMIT,
         isPaid,
+        planType: isPaid ? (subData?.plan_type || 'starter') : 'free',
       })
     }
 
@@ -322,6 +327,10 @@ function App() {
             typeof payload.isPaid === 'boolean'
               ? payload.isPaid
               : prev.isPaid,
+          planType:
+            typeof payload.planType === 'string' && payload.planType
+              ? payload.planType
+              : prev.planType,
         }))
       } else if (typeof payload.remainingGuestGenerations === 'number') {
         setGuestRemaining(Math.max(0, payload.remainingGuestGenerations))
@@ -625,7 +634,7 @@ function App() {
             <>
               <span className="badge">
                 {generationState.isPaid
-                  ? 'Pro plan: Unlimited'
+                  ? `${generationState.planType?.charAt(0).toUpperCase() || 'P'}${generationState.planType?.slice(1) || 'ro'} plan: Unlimited`
                   : `${generationState.count}/${generationState.limit} this month`}
               </span>
               <button className="ghost" type="button" onClick={signOut}>
@@ -729,6 +738,30 @@ function App() {
                   <h3>Generated Voiceover Script</h3>
                   <p>{script}</p>
                 </div>
+                {generationState.isPaid &&
+                  Array.isArray(generationState.hookOptions) &&
+                  generationState.hookOptions.length > 0 && (
+                    <div className="section">
+                      <h3>Hook Variants</h3>
+                      <p>{generationState.hookOptions.join('\n')}</p>
+                    </div>
+                  )}
+                {generationState.isPaid &&
+                  Array.isArray(generationState.endingOptions) &&
+                  generationState.endingOptions.length > 0 && (
+                    <div className="section">
+                      <h3>Ending Variants</h3>
+                      <p>{generationState.endingOptions.join('\n')}</p>
+                    </div>
+                  )}
+                {generationState.isPaid &&
+                  Array.isArray(generationState.captionIdeas) &&
+                  generationState.captionIdeas.length > 0 && (
+                    <div className="section">
+                      <h3>Caption Ideas</h3>
+                      <p>{generationState.captionIdeas.join('\n')}</p>
+                    </div>
+                  )}
               </div>
             )}
           </div>
