@@ -185,20 +185,7 @@ app.post(
           }
 
           if (userId) {
-            const { error } = await supabaseAdmin
-              .from('user_subscriptions')
-              .upsert(
-                {
-                  user_id: userId,
-                  status: 'active',
-                  stripe_customer_id: customerId,
-                  plan_type: 'monthly',
-                  updated_at: new Date().toISOString(),
-                },
-                { onConflict: 'user_id' },
-              )
-
-            if (error) throw error
+            await upsertActiveSubscription(userId, customerId)
           }
           break
         }
