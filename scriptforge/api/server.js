@@ -378,6 +378,19 @@ app.post('/api/create-checkout', checkoutLimiter, async (req, res) => {
   }
 
   try {
+    const { error: pendingError } = await supabaseAdmin
+      .from('user_subscriptions')
+      .upsert(
+        {
+          user_id: userId,
+          status: 'inactive',
+          plan_type: 'monthly',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' },
+      )
+    if (pendingError) throw pendingError
+
     const baseUrl = sanitizeBaseUrl(
       process.env.APP_URL || req.headers.origin || 'http://localhost:5173',
     )
@@ -568,5 +581,22 @@ function parseHttpUrl(value) {
 function normalizeSubscriptionStatus(subscriptionStatus) {
   const cleaned = sanitizeString(subscriptionStatus, 40).toLowerCase()
   return STRIPE_ACTIVE_STATUSES.has(cleaned) ? 'active' : 'inactive'
+}
+
+async function upsertActiveSubscription(userId, customerId) {
+  const { error } = await supabaseAdmin
+    .from('user_subscriptions')
+    .upsert(
+      {
+        user_id: userId,
+        status: 'active',
+        stripe_customer_id: customerId,
+        plan_type: 'monthly',
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    )
+
+  if (error) throw error
 }
 
