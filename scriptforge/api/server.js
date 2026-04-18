@@ -304,6 +304,8 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
           code: 'LIMIT_REACHED',
           error:
             'Free guest limit reached (3 generations). Sign in or upgrade to continue.',
+          count: guestUsage.count,
+          limit: LOGGED_OUT_LIMIT,
         })
       }
     } else {
@@ -344,6 +346,8 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
       return res.json({
         script,
         isPaid: false,
+        count: guestUsage.count,
+        limit: LOGGED_OUT_LIMIT,
         remainingGuestGenerations: Math.max(0, LOGGED_OUT_LIMIT - guestUsage.count),
       })
     }

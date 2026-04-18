@@ -93,6 +93,11 @@ function App() {
     generationState.count >= generationState.limit
   const isGenerationLimitReached = isGuestLimitReached || isFreeUserLimitReached
   const canTriggerGeneration = !isGenerating && !isGenerationLimitReached
+  const guestDisplayRemaining = Math.max(0, guestRemaining)
+  const freeUserDisplayRemaining = Math.max(
+    0,
+    generationState.limit - generationState.count,
+  )
 
   useEffect(() => {
     if (!canUseSupabase) {
@@ -139,6 +144,7 @@ function App() {
     if (!user || !canUseSupabase) {
       setNeedsUsernameSetup(false)
       setGenerationState(INITIAL_GENERATION_STATE)
+      setGuestRemaining(GUEST_LIMIT)
       return
     }
 
@@ -268,6 +274,13 @@ function App() {
       const payload = await readApiPayload(response)
       if (!response.ok) {
         if (response.status === 402) {
+          if (!user) setGuestRemaining(0)
+          if (user && !generationState.isPaid) {
+            setGenerationState((prev) => ({
+              ...prev,
+              count: prev.limit,
+            }))
+          }
           setShowPaywall(true)
         }
         setError(payload.error ?? 'Script generation failed.')
@@ -290,7 +303,7 @@ function App() {
               : prev.isPaid,
         }))
       } else if (typeof payload.remainingGuestGenerations === 'number') {
-        setGuestRemaining(payload.remainingGuestGenerations)
+        setGuestRemaining(Math.max(0, payload.remainingGuestGenerations))
       }
     } catch (requestError) {
       setError(requestError.message)
@@ -653,8 +666,8 @@ function App() {
                   {user
                     ? generationState.isPaid
                       ? 'Unlimited generations enabled.'
-                      : `${Math.max(0, generationState.limit - generationState.count)} free generations left this month.`
-                    : `${guestRemaining} of ${GUEST_LIMIT} free guest generations left.`}
+                      : `${freeUserDisplayRemaining} free generations left this month.`
+                    : `${guestDisplayRemaining} of ${GUEST_LIMIT} free guest generations left this month.`}
                 </span>
                 <div className="actions">
                   <button
@@ -665,6 +678,20 @@ function App() {
                   >
                     {isGenerating ? 'Generating...' : 'Generate Script'}
                   </button>
+                  {isGenerationLimitReached && (
+                    <button
+                      className="ghost"
+                      type="button"
+                      onClick={startCheckout}
+                      disabled={!user || isCheckoutLoading}
+                    >
+                      {user
+                        ? isCheckoutLoading
+                          ? 'Opening checkout...'
+                          : 'Upgrade'
+                        : 'Sign in to upgrade'}
+                    </button>
+                  )}
                   {script && (
                     <button className="ghost" type="button" onClick={copyScript}>
                       Copy to clipboard
