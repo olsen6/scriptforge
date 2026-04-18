@@ -74,43 +74,6 @@ REQUIRED — use at least 3: caught, confessed, discovered, froze, admitted, exp
 
 Never use the same voice or pacing twice. Every script should feel like it could only have been written for that one story. OUTPUT ONLY THE RAW VOICEOVER. NOTHING ELSE.`
 
-const QUALITY_REWRITE_PROMPT = `You are ScriptForge's conversion editor for paid creator clients.
-
-Your job is to rewrite an existing TikTok script so it feels 10x sharper, nastier, and more addictive without breaking structure.
-Think like a creator selling attention in a crowded feed: every line must earn watch time.
-
-STRICT REQUIREMENTS:
-- Keep EXACT section structure:
-  🔥 HOOK:
-  📈 ESCALATION:
-  🎭 TWIST:
-  💬 ENGAGEMENT BAIT:
-- Keep the same core facts, but increase emotional punch, urgency, and specificity.
-- Replace weak language with concrete language.
-- Make every escalation bullet hurt more than the one before it.
-- Ensure at least one [PAUSE] marker appears before the ugliest reveal.
-- Preserve all required words and do not use forbidden words.
-- End final line with: "Comment TEAM A or TEAM B."
-- Optimize for read-aloud pacing (shorter lines, stronger cadence, minimal filler).
-- Prefer conflict language that triggers comments ("betrayed", "exposed", "blamed", "humiliated", "set up", "backfired").
-- Output script only, no analysis.`
-
-const COMPLIANCE_FIX_PROMPT = `You are a strict formatter and compliance enforcer for ScriptForge scripts.
-
-Given a candidate script, return a corrected version that:
-- Uses exactly these sections in order:
-  🔥 HOOK:
-  📈 ESCALATION:
-  🎭 TWIST:
-  💬 ENGAGEMENT BAIT:
-- Ensures ESCALATION has 4-7 dash bullets.
-- Ensures all required words appear at least once across the full script.
-- Ensures forbidden words are absent.
-- Ensures [PAUSE] appears before the ugliest reveal in escalation.
-- Ensures last sentence is exactly: "Comment TEAM A or TEAM B."
-
-Return only the corrected script, no commentary.`
-
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null
@@ -370,42 +333,10 @@ app.post('/api/generate', generateLimiter, async (req, res) => {
       ],
     })
 
-    const firstDraft = completion.choices?.[0]?.message?.content?.trim()
-    if (!firstDraft) {
+    const script = completion.choices?.[0]?.message?.content?.trim()
+    if (!script) {
       throw new Error('OpenAI returned an empty script.')
     }
-
-    const rewrite = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0.95,
-      messages: [
-        { role: 'system', content: QUALITY_REWRITE_PROMPT },
-        {
-          role: 'user',
-          content: `ORIGINAL STORY:\n${story}\n\nCURRENT SCRIPT DRAFT:\n${firstDraft}`,
-        },
-      ],
-    })
-
-    const rewrittenScript =
-      rewrite.choices?.[0]?.message?.content?.trim() || firstDraft
-
-    const compliance = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0.3,
-      messages: [
-        { role: 'system', content: COMPLIANCE_FIX_PROMPT },
-        {
-          role: 'user',
-          content: `Required words: ${REQUIRED_WORDS.join(', ')}\n\nCandidate script:\n${rewrittenScript}`,
-        },
-      ],
-    })
-
-    const finalScript =
-      compliance.choices?.[0]?.message?.content?.trim() || rewrittenScript
-
-    const script = normalizeScriptOutput(finalScript)
 
     if (!userId) {
       const guestUsage = getGuestUsage(req.ip)
@@ -651,16 +582,3 @@ function normalizeSubscriptionStatus(subscriptionStatus) {
   return STRIPE_ACTIVE_STATUSES.has(cleaned) ? 'active' : 'inactive'
 }
 
-function normalizeScriptOutput(script) {
-  const cleaned = sanitizeString(script, 30_000)
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-
-  if (!cleaned) return script
-
-  const hasTeamEnding = cleaned.endsWith('Comment TEAM A or TEAM B.')
-  if (hasTeamEnding) return cleaned
-
-  return `${cleaned}\n\nComment TEAM A or TEAM B.`
-}
