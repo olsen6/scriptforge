@@ -16,6 +16,15 @@ const FREE_USER_LIMIT = 10
 const LOGGED_OUT_LIMIT = 3
 const STORY_MAX_CHARS = 12_000
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+const PLAN_STARTER = 'starter'
+const PLAN_CREATOR = 'creator'
+const PLAN_STUDIO = 'studio'
+const VALID_PLAN_TYPES = new Set([PLAN_STARTER, PLAN_CREATOR, PLAN_STUDIO])
+const PLAN_PRICING = {
+  [PLAN_STARTER]: 1200,
+  [PLAN_CREATOR]: 1500,
+  [PLAN_STUDIO]: 2000,
+}
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -74,6 +83,28 @@ FORBIDDEN: perhaps, slightly, interesting, maybe, basically, honestly, literally
 REQUIRED — use at least 3: caught, confessed, discovered, froze, admitted, exposed, blindsided, collapsed, realized, watched
 
 Never use the same voice or pacing twice. Every script should feel like it could only have been written for that one story. OUTPUT ONLY THE RAW VOICEOVER. NOTHING ELSE.`
+
+const TIER_BONUS_PROMPT = `You write bonus variants for paid creator plans.
+
+Return ONLY valid JSON. No markdown, no code fences.
+
+Rules:
+- Keep wording human and conversational.
+- Do not use emojis.
+- Keep each line concise and speakable.
+
+For plan "creator", return:
+{
+  "hookOptions": ["...", "..."],
+  "endingOptions": ["...", "..."]
+}
+
+For plan "studio", return:
+{
+  "hookOptions": ["...", "...", "..."],
+  "endingOptions": ["...", "...", "..."],
+  "captionIdeas": ["...", "...", "..."]
+}`
 
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })

@@ -3,6 +3,26 @@ import { createClient } from '@supabase/supabase-js'
 
 const FREE_LOGGED_IN_LIMIT = 10
 const GUEST_LIMIT = 3
+const PLAN_OPTIONS = [
+  {
+    id: 'starter',
+    label: 'Starter',
+    price: 12,
+    description: 'Unlimited generations, core output quality',
+  },
+  {
+    id: 'creator',
+    label: 'Creator',
+    price: 15,
+    description: 'Everything in Starter + stronger hooks and retention tuning',
+  },
+  {
+    id: 'studio',
+    label: 'Studio',
+    price: 20,
+    description: 'Everything in Creator + max-intensity punch-up and premium phrasing',
+  },
+]
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.trim() ||
   'https://scriptforge-production.up.railway.app'
@@ -82,6 +102,7 @@ function App() {
   const [guestRemaining, setGuestRemaining] = useState(GUEST_LIMIT)
   const [showPaywall, setShowPaywall] = useState(false)
   const [bannerMessage, setBannerMessage] = useState('')
+  const [selectedPlan, setSelectedPlan] = useState('starter')
   const generateButtonRef = useRef(null)
 
   const user = session?.user ?? null
@@ -352,6 +373,7 @@ function App() {
         body: JSON.stringify({
           userId: user.id,
           userEmail: user.email,
+          planType: selectedPlan,
         }),
       })
       const payload = await readApiPayload(response)
@@ -717,9 +739,38 @@ function App() {
         <div className="modal-backdrop">
           <div className="modal">
             <h3>Free limit reached</h3>
-            <p>Upgrade to ScriptForge Pro for unlimited generations and faster workflow.</p>
+            <p>Upgrade your membership to unlock more powerful output tuning.</p>
+            <div className="sections" style={{ marginTop: 10 }}>
+              {PLAN_OPTIONS.map((plan) => (
+                <label
+                  key={plan.id}
+                  className="section"
+                  style={{
+                    display: 'block',
+                    cursor: 'pointer',
+                    borderColor:
+                      selectedPlan === plan.id ? '#a855f7' : '#4c1d95',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="plan"
+                    value={plan.id}
+                    checked={selectedPlan === plan.id}
+                    onChange={(event) => setSelectedPlan(event.target.value)}
+                    style={{ marginRight: 8 }}
+                  />
+                  <strong>
+                    {plan.label} — ${plan.price}/month
+                  </strong>
+                  <p style={{ marginTop: 6 }}>{plan.description}</p>
+                </label>
+              ))}
+            </div>
             <ul>
-              <li>$12/month recurring plan</li>
+              <li>Starter: best value baseline</li>
+              <li>Creator: noticeably sharper scripts</li>
+              <li>Studio: strongest delivery and tension</li>
               <li>Unlimited script generations</li>
               <li>Priority quality optimization updates</li>
             </ul>
